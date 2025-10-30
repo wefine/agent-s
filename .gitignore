@@ -162,3 +162,13 @@ cython_debug/
 #.idea/
 logs/
 .DS_Store
+
+# lock
+uv.lock
+
+#
+.idea/
+
+# mlflow
+mlruns
+mlartifacts
