@@ -1,0 +1,302 @@
+"""
+Agent-S2.5 简单能力测试
+这个文件用于测试 Agent-S2.5 的基本功能，不需要用户输入
+"""
+
+import io
+import os
+import platform
+from pathlib import Path
+import pyautogui
+from PIL import Image
+from dotenv import load_dotenv
+import datetime
+import time
+
+
+# 加载 .env 文件
+# 优先从当前目录加载，如果不存在则使用系统环境变量
+env_path = Path(__file__).parent / ".env"
+if env_path.exists():
+    load_dotenv(env_path)
+    print(f"✅ 已加载环境变量文件: {env_path}")
+else:
+    print("⚠️  未找到 .env 文件，使用系统环境变量")
+    exit(1)
+
+
+def setup_local_logging():
+    """设置本地日志"""
+    import logging
+
+    os.makedirs("logs", exist_ok=True)
+    ts = datetime.datetime.now().strftime("%Y%m%d@%H%M%S")
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+    if not logger.handlers:
+        fh = logging.FileHandler(f"logs/s2_5_test-{ts}.log", encoding="utf-8")
+        sh = logging.StreamHandler()
+        fh.setLevel(logging.DEBUG)
+        sh.setLevel(logging.INFO)
+        fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+        fh.setFormatter(fmt)
+        sh.setFormatter(fmt)
+        logger.addHandler(fh)
+        logger.addHandler(sh)
+    # 提高内部模块日志的可见性
+    logging.getLogger("desktopenv.agent").setLevel(logging.DEBUG)
+
+
+setup_local_logging()
+
+from gui_agents.s2_5.agents.grounding import OSWorldACI
+from gui_agents.s2_5.agents.agent_s import AgentS2_5
+
+current_platform = platform.system().lower()
+
+# Global flag to track pause state
+paused = False
+
+
+def scale_screen_dimensions(width: int, height: int, max_dim_size: int):
+    """缩放屏幕尺寸以确保适合模型上下文限制"""
+    scale_factor = min(max_dim_size / width, max_dim_size / height, 1)
+    safe_width = int(width * scale_factor)
+    safe_height = int(height * scale_factor)
+    return safe_width, safe_height
+
+
+def get_screenshot_observation(scaled_width, scaled_height):
+    """获取屏幕截图并转换为 Agent 需要的格式
+
+    Args:
+        scaled_width: 缩放后的屏幕宽度
+        scaled_height: 缩放后的屏幕高度
+
+    Returns:
+        包含 screenshot 的观察字典
+    """
+    # 获取屏幕截图
+    screenshot = pyautogui.screenshot()
+    # 缩放截图以适应模型限制
+    screenshot = screenshot.resize((scaled_width, scaled_height), Image.LANCZOS)
+
+    # 转换为字节流（Agent 需要的格式）
+    buffered = io.BytesIO()
+    screenshot.save(buffered, format="PNG")
+    screenshot_bytes = buffered.getvalue()
+
+    return {
+        "screenshot": screenshot_bytes,
+    }
+
+
+def run_agent(agent, instruction: str, scaled_width: int, scaled_height: int):
+    """运行 Agent 执行任务
+
+    Args:
+        agent: AgentS2_5 实例
+        instruction: 任务指令
+        scaled_width: 缩放后的屏幕宽度
+        scaled_height: 缩放后的屏幕高度
+    """
+    global paused
+    obs = {}
+    traj = "Task:\n" + instruction
+    subtask_traj = ""
+
+    for step in range(15):
+        # Check if we're in paused state and wait
+        while paused:
+            time.sleep(0.1)
+
+        # Get screen shot using pyautogui
+        observation = get_screenshot_observation(scaled_width, scaled_height)
+        obs["screenshot"] = observation["screenshot"]
+
+        # Check again for pause state before prediction
+        while paused:
+            time.sleep(0.1)
+
+        print(f"\n🔄 Step {step + 1}/15: Getting next action from agent...")
+
+        # Get next action code from the agent
+        info, code = agent.predict(instruction=instruction, observation=obs)
+
+        if "done" in code[0].lower() or "fail" in code[0].lower():
+            if platform.system() == "Darwin":
+                os.system(
+                    f'osascript -e \'display dialog "Task Completed" with title "Agent-S2.5 Test" buttons "OK" default button "OK"\''
+                )
+            elif platform.system() == "Linux":
+                os.system(
+                    f'zenity --info --title="Agent-S2.5 Test" --text="Task Completed" --width=200 --height=100'
+                )
+            break
+
+        if "next" in code[0].lower():
+            continue
+
+        if "wait" in code[0].lower():
+            print("⏳ Agent requested wait...")
+            time.sleep(5)
+            continue
+
+        else:
+            time.sleep(1.0)
+            print("EXECUTING CODE:", code[0])
+
+            # Check for pause state before execution
+            while paused:
+                time.sleep(0.1)
+
+            # Execute the code
+            exec(code[0])
+            time.sleep(1.0)
+
+            # Update task and subtask trajectories
+            if "reflection" in info and "executor_plan" in info:
+                traj += (
+                    "\n\nReflection:\n"
+                    + str(info["reflection"])
+                    + "\n\n----------------------\n\nPlan:\n"
+                    + info["executor_plan"]
+                )
+
+
+def test_simple_task():
+    """简单能力测试：执行预定义的桌面任务"""
+    print("=" * 50)
+    print("Agent-S2.5 简单能力测试")
+    print("=" * 50)
+
+    # 获取屏幕尺寸
+    screen_width, screen_height = pyautogui.size()
+
+    print(f"\n📊 系统信息:")
+    print(f"   - 操作系统: {current_platform}")
+    print(f"   - 屏幕尺寸: {screen_width}x{screen_height}")
+
+    # 缩放屏幕尺寸以适应模型限制
+    scaled_width, scaled_height = scale_screen_dimensions(
+        screen_width, screen_height, max_dim_size=2400
+    )
+    print(f"   - 缩放后尺寸: {scaled_width}x{scaled_height}")
+
+    # 配置主模型参数（从环境变量读取）
+    engine_params = {
+        "engine_type": os.getenv("PROVIDER", "open_router"),
+        "model": os.getenv("MODEL", "openai/gpt-4o-mini"),
+        "base_url": os.getenv("MODEL_URL", ""),
+        "api_key": os.getenv("MODEL_API_KEY", os.getenv("OPENROUTER_API_KEY", "")),
+    }
+
+    # 如果使用 open_router，设置默认 base_url
+    if engine_params["engine_type"] == "open_router" and not engine_params["base_url"]:
+        engine_params["base_url"] = "https://openrouter.ai/api/v1"
+
+    # 配置 Grounding 模型参数
+    engine_params_for_grounding = {
+        "engine_type": os.getenv("GROUND_PROVIDER", "open_router"),
+        "model": os.getenv("GROUND_MODEL", "bytedance/ui-tars-1.5-7b"),
+        "base_url": os.getenv("GROUND_URL", "https://openrouter.ai/api/v1"),
+        "api_key": os.getenv("GROUND_API_KEY", os.getenv("OPENROUTER_API_KEY", "")),
+        "grounding_width": int(os.getenv("GROUNDING_WIDTH", "1920")),
+        "grounding_height": int(os.getenv("GROUNDING_HEIGHT", "1080")),
+    }
+
+    print(f"\n🔧 模型配置:")
+    print(f"   - 主模型 Provider: {engine_params['engine_type']}")
+    print(f"   - 主模型: {engine_params['model']}")
+    print(f"   - 主模型 API: {engine_params['base_url']}")
+    print(
+        f"   - 主模型 API Key: {'✓ 已设置' if engine_params['api_key'] else '✗ 未设置'}"
+    )
+    print(f"   - Grounding Provider: {engine_params_for_grounding['engine_type']}")
+    print(f"   - Grounding 模型: {engine_params_for_grounding['model']}")
+    print(f"   - Grounding API: {engine_params_for_grounding['base_url']}")
+    print(
+        f"   - Grounding API Key: {'✓ 已设置' if engine_params_for_grounding['api_key'] else '✗ 未设置'}"
+    )
+    print(
+        f"   - Grounding 尺寸: {engine_params_for_grounding['grounding_width']}x{engine_params_for_grounding['grounding_height']}"
+    )
+
+    print("\n🔨 初始化 Agent...")
+
+    # 初始化 Grounding Agent
+    print("   - 正在初始化 Grounding Agent...")
+    grounding_agent = OSWorldACI(
+        platform=current_platform,
+        engine_params_for_generation=engine_params,
+        engine_params_for_grounding=engine_params_for_grounding,
+        width=screen_width,
+        height=screen_height,
+    )
+    print("   ✓ Grounding Agent 初始化完成")
+
+    # 初始化 Agent-S2.5
+    print("   - 正在初始化 Agent-S2.5...")
+    max_trajectory_length = int(os.getenv("MAX_TRAJECTORY_LENGTH", "8"))
+    enable_reflection = os.getenv("ENABLE_REFLECTION", "true").lower() == "true"
+
+    agent = AgentS2_5(
+        engine_params,
+        grounding_agent,
+        platform=current_platform,
+        max_trajectory_length=max_trajectory_length,
+        enable_reflection=enable_reflection,
+    )
+    print("   ✓ Agent-S2.5 初始化完成")
+    print(f"   - 最大轨迹长度: {max_trajectory_length}")
+    print(f"   - 反思功能: {'启用' if enable_reflection else '禁用'}")
+
+    # 预定义测试任务（可以根据需要修改）
+    instruction = os.getenv("TEST_TASK", "打开Google，查询深圳今天的天气")
+
+    print(f"\n" + "=" * 50)
+    print(f"📋 测试任务: {instruction}")
+    print("=" * 50)
+
+    try:
+        # 重置 agent 状态
+        agent.reset()
+
+        # 运行 agent
+        run_agent(agent, instruction, scaled_width, scaled_height)
+
+        print("\n✅ 测试完成！")
+
+    except Exception as e:
+        print(f"\n❌ 发生错误: {e}")
+        print(f"\n🔍 错误详情:")
+        print(f"   - 错误类型: {type(e).__name__}")
+        print(f"   - 错误信息: {str(e)}")
+        import traceback
+
+        print(f"\n📜 完整堆栈:")
+        traceback.print_exc()
+
+
+def setup_mlflow_logging():
+    import mlflow
+
+    # Enable autologging with all features
+    mlflow.openai.autolog()
+
+    # Configure MLflow tracking
+    mlflow.set_tracking_uri("http://localhost:8080")  # Use local MLflow server
+    mlflow.set_experiment("agent-s2")
+
+
+setup_mlflow_logging()
+
+
+def main():
+    """主函数"""
+    test_simple_task()
+
+
+if __name__ == "__main__":
+    main()
+    time.sleep(5)

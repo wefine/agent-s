@@ -51,7 +51,7 @@ def setup_mlflow_logging():
 
     # Configure MLflow tracking
     mlflow.set_tracking_uri("http://localhost:8080")  # Use local MLflow server
-    mlflow.set_experiment("agent-s")
+    mlflow.set_experiment("agent-s3")
 
 
 setup_local_logging()

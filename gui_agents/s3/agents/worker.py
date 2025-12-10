@@ -92,7 +92,7 @@ class Worker(BaseModule):
         This method ensures that the agent's message history does not exceed the maximum trajectory length.
 
         Side Effects:
-            - Modifies the messages of generator, reflection, and bon_judge agents to fit within the context limits.
+            - Modifies the messages of generator and reflection agents to fit within the context limits.
         """
         engine_type = self.engine_params.get("engine_type", "")
 
