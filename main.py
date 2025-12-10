@@ -158,36 +158,16 @@ def example_1_simple_task():
     print(f"   - 反思功能: 启用")
 
     # 执行任务
-    instruction = "打开浏览器并访问 https://www.baidu.com"
+    # instruction = "打开Google浏览器并访问 https://www.baidu.com"
+    instruction = "打开Google，查询深圳今天的天气"
 
     print(f"\n" + "=" * 50)
     print(f"📋 任务指令: {instruction}")
     print("=" * 50)
 
-    print("\n📸 正在获取屏幕截图...")
-    observation = get_screenshot_observation(screen_width, screen_height)
-    screenshot_size = len(observation["screenshot"]) / 1024
-    print(f"   ✓ 截图完成 (大小: {screenshot_size:.1f} KB)")
-
-    print("\n🤖 正在调用 Agent 生成操作...")
-    print("   - 调用主模型分析任务...")
-    print("   - 调用 Grounding 模型定位元素...")
-
     try:
-        info, actions = agent.predict(instruction, observation)
+        run_agent(agent, instruction)
 
-        print("\nAgent 响应成功!")
-        print(f"\n规划的操作:")
-        for i, action in enumerate(actions, 1):
-            print(f"   {i}. {action[:100]}{'...' if len(action) > 100 else ''}")
-
-        if info:
-            print(f"\n额外信息:")
-            for key, value in info.items():
-                if isinstance(value, str) and len(value) > 100:
-                    print(f"   - {key}: {value[:100]}...")
-                else:
-                    print(f"   - {key}: {value}")
     except Exception as e:
         print(f"\n❌ 发生错误: {e}")
         print(f"\n🔍 错误详情:")
@@ -199,18 +179,76 @@ def example_1_simple_task():
         traceback.print_exc()
 
 
-def main():
-    """主函数：运行所有示例"""
-    print(
-        """
-    ╔══════════════════════════════════════════════════╗
-    ║         Agent-S 基础使用示例                     ║
-    ║    开源的计算机控制 AI Agent 框架                 ║
-    ║        OpenRouter 模型配置                       ║
-    ╚══════════════════════════════════════════════════╝
-    """
-    )
+import datetime, time
 
+paused = False
+
+
+def run_agent(agent, instruction: str):
+    global paused
+    obs = {}
+    traj = "Task:\n" + instruction
+    subtask_traj = ""
+    for step in range(15):
+        # Check if we're in paused state and wait
+        while paused:
+            time.sleep(0.1)
+        # Get screen shot using pyautogui
+        screen_width, screen_height = pyautogui.size()
+        observation = get_screenshot_observation(screen_width, screen_height)
+
+        # Check again for pause state before prediction
+        while paused:
+            time.sleep(0.1)
+
+        print(f"\n🔄 Step {step + 1}/15: Getting next action from agent...")
+
+        # Get next action code from the agent
+        info, code = agent.predict(instruction=instruction, observation=observation)
+
+        if "done" in code[0].lower() or "fail" in code[0].lower():
+            os.system(
+                f'zenity --info --title="OpenACI Agent" --text="Task Completed" --width=200 --height=100'
+            )
+            break
+
+        if "next" in code[0].lower():
+            continue
+
+        if "wait" in code[0].lower():
+            print("⏳ Agent requested wait...")
+            time.sleep(5)
+            continue
+
+        else:
+            time.sleep(1.0)
+            print("EXECUTING CODE:", code[0])
+
+            # Check for pause state before execution
+            while paused:
+                time.sleep(0.1)
+
+            # Ask for permission before executing
+            exec(code[0])
+            time.sleep(1.0)
+
+            # Update task and subtask trajectories
+            if "reflection" in info and "executor_plan" in info:
+                traj += (
+                    "\n\nReflection:\n"
+                    + str(info["reflection"])
+                    + "\n\n----------------------\n\nPlan:\n"
+                    + info["executor_plan"]
+                )
+
+
+def exec_code():
+    """执行代码"""
+    code = "import pyautogui; pyautogui.click(57, 360, clicks=2, button='left');"
+    exec(code)
+
+
+def main():
     example_1_simple_task()
 
 

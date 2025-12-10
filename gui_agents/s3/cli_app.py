@@ -226,97 +226,9 @@ def run_agent(agent, instruction: str, scaled_width: int, scaled_height: int):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run AgentS3 with specified model.")
-    parser.add_argument(
-        "--provider",
-        type=str,
-        default="openai",
-        help="Specify the provider to use (e.g., openai, anthropic, etc.)",
-    )
-    parser.add_argument(
-        "--model",
-        type=str,
-        default="gpt-5-2025-08-07",
-        help="Specify the model to use (e.g., gpt-5-2025-08-07)",
-    )
-    parser.add_argument(
-        "--model_url",
-        type=str,
-        default="",
-        help="The URL of the main generation model API.",
-    )
-    parser.add_argument(
-        "--model_api_key",
-        type=str,
-        default="",
-        help="The API key of the main generation model.",
-    )
-    parser.add_argument(
-        "--model_temperature",
-        type=float,
-        default=None,
-        help="Temperature to fix the generation model at (e.g. o3 can only be run with 1.0)",
-    )
+    from dotenv import load_dotenv
 
-    # Grounding model config: Self-hosted endpoint based (required)
-    parser.add_argument(
-        "--ground_provider",
-        type=str,
-        required=True,
-        help="The provider for the grounding model",
-    )
-    parser.add_argument(
-        "--ground_url",
-        type=str,
-        required=True,
-        help="The URL of the grounding model",
-    )
-    parser.add_argument(
-        "--ground_api_key",
-        type=str,
-        default="",
-        help="The API key of the grounding model.",
-    )
-    parser.add_argument(
-        "--ground_model",
-        type=str,
-        required=True,
-        help="The model name for the grounding model",
-    )
-    parser.add_argument(
-        "--grounding_width",
-        type=int,
-        required=True,
-        help="Width of screenshot image after processor rescaling",
-    )
-    parser.add_argument(
-        "--grounding_height",
-        type=int,
-        required=True,
-        help="Height of screenshot image after processor rescaling",
-    )
-
-    # AgentS3 specific arguments
-    parser.add_argument(
-        "--max_trajectory_length",
-        type=int,
-        default=8,
-        help="Maximum number of image turns to keep in trajectory",
-    )
-    parser.add_argument(
-        "--enable_reflection",
-        action="store_true",
-        default=True,
-        help="Enable reflection agent to assist the worker agent",
-    )
-    parser.add_argument(
-        "--enable_local_env",
-        action="store_true",
-        default=False,
-        help="Enable local coding environment for code execution (WARNING: Executes arbitrary code locally)",
-    )
-
-    args = parser.parse_args()
+    load_dotenv()
 
     # Re-scales screenshot size to ensure it fits in UI-TARS context limit
     screen_width, screen_height = pyautogui.size()
@@ -326,33 +238,25 @@ def main():
 
     # Load the general engine params
     engine_params = {
-        "engine_type": args.provider,
-        "model": args.model,
-        "base_url": args.model_url,
-        "api_key": args.model_api_key,
-        "temperature": getattr(args, "model_temperature", None),
+        "engine_type": os.getenv("PROVIDER"),
+        "model": os.getenv("MODEL"),
+        "base_url": os.getenv("MODEL_URL"),
+        "api_key": os.getenv("MODEL_API_KEY"),
+        "temperature": os.getenv("MODEL_TEMPERATURE"),
     }
 
     # Load the grounding engine from a custom endpoint
     engine_params_for_grounding = {
-        "engine_type": args.ground_provider,
-        "model": args.ground_model,
-        "base_url": args.ground_url,
-        "api_key": args.ground_api_key,
-        "grounding_width": args.grounding_width,
-        "grounding_height": args.grounding_height,
+        "engine_type": os.getenv("GROUND_PROVIDER"),
+        "model": os.getenv("GROUND_MODEL"),
+        "base_url": os.getenv("GROUND_URL"),
+        "api_key": os.getenv("GROUND_API_KEY"),
+        "grounding_width": os.getenv("GROUNDING_WIDTH"),
+        "grounding_height": os.getenv("GROUNDING_HEIGHT"),
     }
 
-    # Initialize environment based on user preference
-    local_env = None
-    if args.enable_local_env:
-        print(
-            "⚠️  WARNING: Local coding environment enabled. This will execute arbitrary code locally!"
-        )
-        local_env = LocalEnv()
-
     grounding_agent = OSWorldACI(
-        env=local_env,
+        env=None,
         platform=current_platform,
         engine_params_for_generation=engine_params,
         engine_params_for_grounding=engine_params_for_grounding,
@@ -364,8 +268,8 @@ def main():
         engine_params,
         grounding_agent,
         platform=current_platform,
-        max_trajectory_length=args.max_trajectory_length,
-        enable_reflection=args.enable_reflection,
+        max_trajectory_length=8,
+        enable_reflection=True,
     )
 
     while True:
@@ -380,6 +284,19 @@ def main():
         if response.lower() != "y":
             break
 
+
+def setup_mlflow_logging():
+    import mlflow
+
+    # Enable autologging with all features
+    mlflow.openai.autolog()
+
+    # Configure MLflow tracking
+    mlflow.set_tracking_uri("http://localhost:8080")  # Use local MLflow server
+    mlflow.set_experiment("agent-s")
+
+
+setup_mlflow_logging()
 
 if __name__ == "__main__":
     main()
